@@ -309,7 +309,8 @@ def get_friend_invite(message):
     for friend in friend_list:
         print(friend[2], friend[3])
         friend_list_txt += f'ID: {friend[2]} Имя: {friend[3]}\n'
-        markup.add(types.InlineKeyboardButton(f'ID: {friend[2]} | Имя: {friend[3]}\n', callback_data='add_menu'))
+        markup.add(
+            types.InlineKeyboardButton(f'ID: {friend[2]} | Имя: {friend[3]}\n', callback_data=f'add_menu{friend[2]}'))
 
     if friend_list_txt == '':
         friend_list_txt = 'Список заявок пуст(\nДрузья могут отсылать вам заявки по ID'
@@ -324,14 +325,22 @@ def get_friend_invite(message):
 
 @bot.callback_query_handler(func=lambda callback: True)
 def callback_message(callback):
-    if callback.data == 'add_menu':
-        print(callback.message)
-        friend_info = callback.message.json['reply_markup']['inline_keyboard'][0][0]['text']
-        print(friend_info)
-        friend_info_array = friend_info.split('|')
-        friend_info_id = int(friend_info_array[0].replace('ID:', '').strip())
+    # print(callback.data)
+    # print(str(callback.data).replace('delete_menu', '').strip().isdigit())
+    number_delete = str(callback.data).replace('delete_menu', '').strip()
+    number_add = str(callback.data).replace('add_menu', '').strip()
+    number_event = str(callback.data).replace('event_menu', '').strip()
+    if callback.data == 'add_menu' + number_add:
+        # print(callback.message)
+        # bot.send_message(callback.message.chat.id, callback)
+        # friend_info = callback.message.json['reply_markup']['inline_keyboard'][0][0]['text']
+        # print(friend_info)
+        # friend_info_array = friend_info.split('|')
+        # friend_info_id = int(friend_info_array[0].replace('ID:', '').strip())
 
-        invite_text = f'Выбран друг:\n{friend_info} \nДобавить в друзья?'
+        friend_info_id = int(number_add)
+
+        invite_text = f'Выбран друг:\n{number_add} \nДобавить в друзья?'
 
         markup = types.ReplyKeyboardMarkup()
 
@@ -345,33 +354,38 @@ def callback_message(callback):
 
         bot.send_message(callback.message.chat.id, invite_text, reply_markup=markup)
         bot.register_next_step_handler(callback.message, on_click_menu_confirmation, friend_info_id=friend_info_id)
-    elif callback.data == 'delete_menu':
-        friend_info = callback.message.json['reply_markup']['inline_keyboard'][0][0]['text']
-        friend_info_array = friend_info.split('|')
-        friend_info_id = int(friend_info_array[0].replace('ID:', '').strip())
+    elif callback.data == 'delete_menu' + number_delete:
         markup = types.ReplyKeyboardMarkup()
         btn1 = types.KeyboardButton('Удалить пользователя из друзей')
         btn2 = types.KeyboardButton('Отмена')
         markup.row(btn1)
         markup.row(btn2)
-        invite_text = f'Выбран друг:\n{friend_info} \n'
+        friend_info_id = int(number_delete)
+        invite_text = f'Выбран друг:\n{friend_info_id} \n'
         bot.send_message(callback.message.chat.id, invite_text, reply_markup=markup)
         bot.register_next_step_handler(callback.message, on_click_menu_confirmation, friend_info_id=friend_info_id)
-    elif callback.data == 'event_menu':
-        # print('event menu')
-        friend_info = callback.message.json['reply_markup']['inline_keyboard'][0][0]['text']
-        friend_info_array = friend_info.split('|')
-        friend_info_id = int(friend_info_array[0].replace('ID:', '').strip())
+    elif callback.data == 'event_menu' + number_event:
+        print('event menu')
         markup = types.ReplyKeyboardMarkup()
-        btn1 = types.KeyboardButton('Удалить пользователя из друзей')
-        btn2 = types.KeyboardButton('Отмена')
+        btn1 = types.KeyboardButton('Пригласить друзей')
+        btn2 = types.KeyboardButton('Удалить мероприятие')
+        btn3 = types.KeyboardButton('Отмена')
+        btn4 = types.KeyboardButton('Подробнее о мероприятии')
         markup.row(btn1)
+        markup.row(btn4)
         markup.row(btn2)
-        invite_text = f'Выбран друг:\n{friend_info} \n'
+        markup.row(btn3)
+        event_id = int(number_event)
+        invite_text = f'Выбрано мероприятие:\n{event_id} \n'
         bot.send_message(callback.message.chat.id, invite_text, reply_markup=markup)
-        bot.register_next_step_handler(callback.message, on_click_menu_confirmation, friend_info_id=friend_info_id)
+        bot.register_next_step_handler(callback.message, on_click_event_menu_confirmation, event_id=event_id)
+    elif callback.data == 'event_cancel_menu':
+        create_event_type_menu(callback.message)
 
 
+def on_click_event_menu_confirmation(message, event_id):
+    if message.text == 'Отмена':
+        get_event_list_create_by_me(message)
 
 
 def on_click_menu_event_setting(message, event_id):
@@ -491,7 +505,9 @@ def get_friend_list(message):
     for friend in friend_list:
         print(friend[2], friend[3])
         friend_list_txt += f'ID: {friend[2]} Имя: {friend[3]}\n'
-        markup.add(types.InlineKeyboardButton(f'ID: {friend[2]} | Имя: {friend[3]}\n', callback_data='delete_menu'))
+        markup.add(types.InlineKeyboardButton(f'ID: {friend[2]} | Имя: {friend[3]}\n',
+                                              callback_data=f'delete_menu{friend[2]}'))
+        print(f'delete_menu{friend[2]}')
 
     if friend_list_txt == '':
         friend_list_txt = 'Ваш список друзей пуст(\nВы можете добавить друзей с помощью их ID'
@@ -577,7 +593,7 @@ def create_event(message):
 
 
 def get_event_list_create_by_me(message):
-    bot.send_message(message.chat.id, 'Загрузка мероприятий', reply_markup=REMOVE_BUTTON_SETTING)
+    bot.send_message(message.chat.id, 'Загрузка мероприятий...', reply_markup=REMOVE_BUTTON_SETTING)
     # bot.delete_message(message.chat.id, message.message_id - 1)
 
     conn = sqlite3.connect(DBNAME)
@@ -600,11 +616,13 @@ def get_event_list_create_by_me(message):
     print(event_list)
     for event in event_list:
         print(event[0], event[1])
-        markup.add(types.InlineKeyboardButton(f'ID: {event[0]} | Имя: {event[1]}\n', callback_data='event_menu'))
-    markup.add(types.InlineKeyboardButton('Отмена', callback_data='event_menu'))
+        markup.add(
+            types.InlineKeyboardButton(f'ID: {event[0]} | Имя: {event[1]}\n', callback_data=f'event_menu{event[0]}'))
+    markup.add(types.InlineKeyboardButton('Отмена', callback_data='event_cancel_menu'))
     if event_list == []:
-        friend_list_txt = 'Вы не ещё не создали ни одного мероприятия(\n'
+        friend_list_txt = 'Вы ещё не создали ни одного мероприятия(\n'
         bot.send_message(message.chat.id, friend_list_txt)
+        create_event_type_menu(message)
     else:
         bot.send_message(message.chat.id, 'Ваш список мероприятий:', reply_markup=markup)
     # print(friend_list)
