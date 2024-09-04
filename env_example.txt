@@ -1,0 +1,3 @@
+# token for bot
+TOKEN=...
+DBNAME=mydb.sql
