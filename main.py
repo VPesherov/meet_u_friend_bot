@@ -323,6 +323,39 @@ def get_friend_invite(message):
     bot.register_next_step_handler(message, on_click_profile_menu)
 
 
+def get_info_about_event_by_id(event_id):
+    conn = sqlite3.connect(DBNAME)
+    cur = conn.cursor()
+
+    event_info_dict = {
+        'id': event_id,
+        'name': '',
+        'time_and_date': '',
+        'place': '',
+        'info': '',
+        'creator_id': '',
+    }
+
+    cur.execute(
+        'select * from event_list where id = %d' % (event_id)
+    )
+
+    event_info = cur.fetchall()[0]
+
+    # i = 0
+
+    for number, key in enumerate(event_info_dict):
+        event_info_dict[key] = event_info[number]
+
+    print(event_info_dict)
+
+    # print(event_info)
+    cur.close()
+    conn.close()
+    print(event_info[0])
+    return event_info_dict
+
+
 @bot.callback_query_handler(func=lambda callback: True)
 def callback_message(callback):
     # print(callback.data)
@@ -376,23 +409,66 @@ def callback_message(callback):
         markup.row(btn2)
         markup.row(btn3)
         event_id = int(number_event)
-        invite_text = f'Выбрано мероприятие:\n{event_id} \n'
+        event_info_dict = get_info_about_event_by_id(event_id)
+        invite_text = (f'Выбрано мероприятие:\n{event_info_dict["name"]} \n'
+                       f'\nДата и время мероприятия:\n{event_info_dict["time_and_date"]}')
         bot.send_message(callback.message.chat.id, invite_text, reply_markup=markup)
+        bot.delete_message(callback.message.chat.id, callback.message.message_id)
         bot.register_next_step_handler(callback.message, on_click_event_menu_confirmation, event_id=event_id)
     elif callback.data == 'event_cancel_menu':
+        # bot.delete_message(callback.message.chat.id, callback.message.message_id - 2)
+        # bot.delete_message(callback.message.chat.id, callback.message.message_id - 1)
+        bot.delete_message(callback.message.chat.id, callback.message.message_id)
         create_event_type_menu(callback.message)
+
+
+def create_actions_for_event_menu(message, event_id):
+    markup = types.ReplyKeyboardMarkup()
+    btn1 = types.KeyboardButton('Пригласить друзей')
+    btn2 = types.KeyboardButton('Удалить мероприятие')
+    btn3 = types.KeyboardButton('Отмена')
+    btn4 = types.KeyboardButton('Подробнее о мероприятии')
+    markup.row(btn1)
+    markup.row(btn4)
+    markup.row(btn2)
+    markup.row(btn3)
+    event_id = int(event_id)
+    # event_info_dict = get_info_about_event_by_id(event_id)
+    # invite_text = (f'Выбрано мероприятие:\n{event_info_dict["name"]} \n'
+    #                f'\nДата и время мероприятия:\n{event_info_dict["time_and_date"]}')
+    # bot.send_message(message.chat.id, invite_text, reply_markup=markup)
+    # bot.delete_message(message.chat.id, message.message_id)
+    bot.register_next_step_handler(message, on_click_event_menu_confirmation, event_id=event_id)
 
 
 def on_click_event_menu_confirmation(message, event_id):
     if message.text == 'Отмена':
+        # bot.delete_message(message.chat.id, message.message_id - 3)
+        # bot.delete_message(message.chat.id, message.message_id - 2)
+        # bot.delete_message(message.chat.id, message.message_id - 1)
         get_event_list_create_by_me(message)
+    if message.text == 'Удалить мероприятие':
+        # bot.send_message(message.chat.id, event_id)
 
+        conn = sqlite3.connect(DBNAME)
+        cur = conn.cursor()
 
-def on_click_menu_event_setting(message, event_id):
-    if message.text == 'Отмена':
-        create_event_type_menu(message)
-    elif message.text == 'Пригласить друзей':
-        pass
+        cur.execute(
+            'DELETE FROM event_list WHERE id = %d' % (event_id)
+        )
+
+        conn.commit()
+        cur.close()
+        conn.close()
+        bot.send_message(message.chat.id, 'Мероприятие удалено')
+        get_event_list_create_by_me(message)
+    if message.text == 'Подробнее о мероприятии':
+        event_info = get_info_about_event_by_id(event_id)
+        print('-' * 20)
+        print(event_info)
+        event_info_txt = f'ID события: {event_info["id"]}\n\nНазвание мероприятия:\n{event_info["name"]}\n\nВремя и дата мероприятия:\n{event_info["time_and_date"]}\n\nДополнительная информафия:\n{event_info["info"]}'
+        bot.send_message(message.chat.id, event_info_txt)
+        create_actions_for_event_menu(message, event_id)
 
 
 def get_id_from_database(message):
@@ -617,7 +693,8 @@ def get_event_list_create_by_me(message):
     for event in event_list:
         print(event[0], event[1])
         markup.add(
-            types.InlineKeyboardButton(f'ID: {event[0]} | Имя: {event[1]}\n', callback_data=f'event_menu{event[0]}'))
+            types.InlineKeyboardButton(f'ID: {event[0]} | Имя: {event[1]}',
+                                       callback_data=f'event_menu{event[0]}'))
     markup.add(types.InlineKeyboardButton('Отмена', callback_data='event_cancel_menu'))
     if event_list == []:
         friend_list_txt = 'Вы ещё не создали ни одного мероприятия(\n'
