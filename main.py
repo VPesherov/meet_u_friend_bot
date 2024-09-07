@@ -273,6 +273,7 @@ def on_click_profile_menu(message):
         create_main_menu(message)
     if message.text == 'Список друзей':
         get_friend_list(message)
+        bot.register_next_step_handler(message, on_click_profile_menu)
     if message.text == 'Заявки в друзья':
         get_friend_invite(message)
     if message.text == 'Добавить в друзья':
@@ -284,6 +285,7 @@ def on_click_profile_menu(message):
     if message.text == 'Удалить из друзей':
         bot.send_message(message.chat.id, 'Выберите друга, которого хотите удалить')
         get_friend_list(message)
+        bot.register_next_step_handler(message, on_click_profile_menu)
     # bot.delete_message(message.chat.id, message.message_id - 1)
     # bot.delete_message(message.chat.id, message.message_id)
 
@@ -469,6 +471,8 @@ def on_click_event_menu_confirmation(message, event_id):
         event_info_txt = f'ID события: {event_info["id"]}\n\nНазвание мероприятия:\n{event_info["name"]}\n\nВремя и дата мероприятия:\n{event_info["time_and_date"]}\n\nДополнительная информафия:\n{event_info["info"]}'
         bot.send_message(message.chat.id, event_info_txt)
         create_actions_for_event_menu(message, event_id)
+    if message.text == 'Пригласить друзей':
+        print('Пригласить друзей')
 
 
 def get_id_from_database(message):
@@ -595,7 +599,7 @@ def get_friend_list(message):
     cur.close()
     conn.close()
 
-    bot.register_next_step_handler(message, on_click_profile_menu)
+
 
 
 def create_event_from_data(message, event_info):
