@@ -14,7 +14,7 @@ DBNAME = os.getenv('DBNAME')
 REMOVE_BUTTON_SETTING = telebot.types.ReplyKeyboardRemove()
 
 
-def connect_db(dbname):
+def connect_db():
     conn = sqlite3.connect(DBNAME)
     cur = conn.cursor()
 
@@ -28,7 +28,7 @@ def close_connect_to_db(conn, cur):
 
 def create_table():
     print('Функция создания БД')
-    conn, cur = connect_db(DBNAME)
+    conn, cur = connect_db()
 
     cur.execute(
         'CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY AUTOINCREMENT, name varchar(10), tg_id int, username varchar(50), chat_id int)'
@@ -54,7 +54,7 @@ def create_table():
 
 
 def find_user_in_db(message):
-    conn, cur = connect_db(DBNAME)
+    conn, cur = connect_db()
 
     user_tg_id = message.from_user.id
 
@@ -101,7 +101,7 @@ def check_user_name(message):
 
 
 def get_user_info_by_tg_id(tg_id):
-    conn, cur = connect_db(DBNAME)
+    conn, cur = connect_db()
 
     user_info_dict = {
         'id': '',
@@ -128,7 +128,7 @@ def get_user_info_by_tg_id(tg_id):
 
 
 def get_user_info_by_id(id):
-    conn, cur = connect_db(DBNAME)
+    conn, cur = connect_db()
 
     user_info_dict = {
         'id': '',
@@ -156,7 +156,7 @@ def get_user_info_by_id(id):
 
 def create_user(message):
     print('Работает функция создания пользвоателя')
-    conn, cur = connect_db(DBNAME)
+    conn, cur = connect_db()
 
     name = message.text.strip()
 
@@ -182,7 +182,7 @@ def create_user(message):
 
 def get_profile(message):
     # create_table()
-    conn, cur = connect_db(DBNAME)
+    conn, cur = connect_db()
 
     user_tg_id = message.from_user.id
     cur.execute(
@@ -216,7 +216,7 @@ def create_profile_menu(message, user_info_dict):
 
 
 def get_friend_invite(message, user_info_dict):
-    conn, cur = connect_db(DBNAME)
+    conn, cur = connect_db()
 
     user_tg_id = int(user_info_dict['tg_id'])
 
@@ -273,21 +273,48 @@ def callback_message(callback):
             user_info_dict = get_user_info_by_tg_id(int(user_tg_id))
 
             bot.send_message(callback.message.chat.id, invite_text, reply_markup=markup)
-            bot.register_next_step_handler(callback.message, on_click_menu_confirmation, friend_info_dict=friend_info_dict, user_info_dict=user_info_dict)
+            bot.register_next_step_handler(callback.message, on_click_menu_confirmation,
+                                           friend_info_dict=friend_info_dict, user_info_dict=user_info_dict)
+
+
+def change_friend_status(friend_info_id, status, user_info_dict):
+    user_id = int(user_info_dict['id'])
+
+    conn, cur = connect_db()
+
+    cur.execute(
+        'update friend_list set friend_status = "%s" where user_id = %d and friend_id = %d' % (
+            status, user_id, friend_info_id)
+    )
+
+    conn.commit()
+
+    cur.execute(
+        'update friend_list set friend_status = "%s" where user_id = %d and friend_id = %d' % (
+            status, friend_info_id, user_id)
+    )
+
+    conn.commit()
+    close_connect_to_db(conn, cur)
 
 
 def on_click_menu_confirmation(message, friend_info_dict, user_info_dict):
     if message.text == 'Принять заявку':
-        pass
+        # pass
         # add_friend(message, friend_info_id, 'friend')
+        change_friend_status(friend_info_dict['id'], 'friend', user_info_dict)
+        bot.send_message(message.chat.id, 'Заявка в друзья успешно принята')
+        create_profile_menu(message, user_info_dict)
     elif message.text == 'Отклонить заявку':
-        pass
-        # add_friend(message, friend_info_id, 'rejected')
+        change_friend_status(friend_info_dict['id'], 'rejected', user_info_dict)
+        bot.send_message(message.chat.id, 'Заявка в друзья отклонена')
+        create_profile_menu(message, user_info_dict)
     elif message.text == 'Отмена':
         bot.send_message(message.chat.id, 'Отмена')
         create_profile_menu(message, user_info_dict)
     elif message.text == 'Удалить пользователя из друзей':
-        pass
+        # pass
+        bot.send_message(message.chat.id, 'Пользователь удален из ваших друзей')
         # add_friend(message, friend_info_id, 'deleted')
 
 
@@ -310,7 +337,7 @@ def on_click_profile_menu(message, user_info_dict):
 
 
 def get_friend_list(message, user_info_dict):
-    conn, cur = connect_db(DBNAME)
+    conn, cur = connect_db()
 
     user_tg_id = int(user_info_dict['tg_id'])
 
