@@ -74,13 +74,13 @@ def find_user_in_db(message):
 
 def create_main_menu(message, user_info_dict):
     print('Создал меню')
-    markup = types.ReplyKeyboardMarkup()
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
     btn1 = types.KeyboardButton('Создать мероприятие')
     btn2 = types.KeyboardButton('Мои мероприятия')
     markup.row(btn1)
     markup.row(btn2)
     btn3 = types.KeyboardButton('Профиль')
-    btn4 = types.KeyboardButton('Заявки в друзья')
+    btn4 = types.KeyboardButton('Приглашения')
     markup.row(btn3, btn4)
     bot.send_message(message.chat.id, 'Выберите действие', reply_markup=markup)
     bot.register_next_step_handler(message, on_click_main_menu, user_info_dict)
@@ -143,6 +143,8 @@ def get_user_info_by_id(id):
     )
 
     user_info = cur.fetchall()
+    if not user_info:
+        return False
     print(user_info[0])
 
     for number, key in enumerate(user_info_dict):
@@ -200,7 +202,7 @@ def get_profile(message):
 
 def create_profile_menu(message, user_info_dict):
     print('Создал меню профиля')
-    markup = types.ReplyKeyboardMarkup()
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
     btn1 = types.KeyboardButton('Список друзей')
     btn6 = types.KeyboardButton('Заявки в друзья')
     btn2 = types.KeyboardButton('Добавить в друзья')
@@ -260,7 +262,7 @@ def callback_message(callback):
 
             invite_text = f'Выбран друг:\nID: {friend_info_dict["id"]} Имя: {friend_info_dict["name"]} \nДобавить в друзья?'
 
-            markup = types.ReplyKeyboardMarkup()
+            markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
 
             btn1 = types.KeyboardButton('Принять заявку')
             btn2 = types.KeyboardButton('Отклонить заявку')
@@ -275,6 +277,32 @@ def callback_message(callback):
             bot.send_message(callback.message.chat.id, invite_text, reply_markup=markup)
             bot.register_next_step_handler(callback.message, on_click_menu_confirmation,
                                            friend_info_dict=friend_info_dict, user_info_dict=user_info_dict)
+    if 'delete_friend_menu' in callback.data:
+        user_tg_id, number_delete = str(callback.data).replace('delete_friend_menu', '|').strip().split('|')
+        if callback.data == user_tg_id + 'delete_friend_menu' + number_delete:
+            markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
+            btn1 = types.KeyboardButton('Да')
+            btn2 = types.KeyboardButton('Отмена')
+            markup.row(btn1)
+            markup.row(btn2)
+            friend_info_id = int(number_delete)
+            friend_info = get_user_info_by_id(friend_info_id)
+            user_info_dict = get_user_info_by_tg_id(int(user_tg_id))
+
+            invite_text = f'Выбран друг:\n{friend_info_id} | {friend_info["name"]} \n Вы действительно хотите удалить его?'
+            bot.send_message(callback.message.chat.id, invite_text, reply_markup=markup)
+            bot.register_next_step_handler(callback.message, on_click_menu_delete_confirmation,
+                                           friend_info_id=friend_info_id, user_info_dict=user_info_dict)
+
+
+
+def on_click_menu_delete_confirmation(message, friend_info_id, user_info_dict):
+    if message.text == 'Да':
+        change_friend_status(friend_info_id, 'deleted', user_info_dict)
+        bot.send_message(message.chat.id, 'Пользователь удален из ваших друзей')
+    elif message.text == 'Отмена':
+        bot.send_message(message.chat.id, 'Отмена')
+    create_profile_menu(message, user_info_dict)
 
 
 def change_friend_status(friend_info_id, status, user_info_dict):
@@ -318,6 +346,105 @@ def on_click_menu_confirmation(message, friend_info_dict, user_info_dict):
         # add_friend(message, friend_info_id, 'deleted')
 
 
+def check_friend(my_id, invite_friend_id):
+    conn, cur = connect_db()
+
+    cur.execute(
+        'select id from friend_list where user_id = %d and friend_id = %d' % (invite_friend_id, my_id)
+    )
+    friend_status = cur.fetchall()
+    print(friend_status)
+    close_connect_to_db(conn, cur)
+
+    if not friend_status:
+        return False
+    else:
+        return True
+
+
+def return_friend_status(my_id, invite_friend_id, status):
+    conn, cur = connect_db()
+
+    cur.execute(
+        'select id from friend_list where user_id = %d and friend_id = %d and friend_status = "%s"' % (
+            invite_friend_id, my_id, status)
+    )
+    friend_status = cur.fetchall()
+    print('status')
+    print(friend_status)
+    close_connect_to_db(conn, cur)
+
+    if not friend_status:
+        return False
+    else:
+        return True
+
+
+def send_friend_invitation(message, user_info_dict):
+    invite_friend_id = message.text
+    try:
+        invite_friend_id = int(invite_friend_id)
+    except:
+        print('Ошибка:\n', traceback.format_exc())
+        bot.send_message(message.chat.id, 'Ошибка\nID друга - должно быть числом')
+        create_profile_menu(message, user_info_dict)
+        return 0
+
+    my_id = user_info_dict['id']
+
+    if my_id == invite_friend_id:
+        bot.send_message(message.chat.id, 'Вы не можете отправить заявку самому себе')
+        create_profile_menu(message, user_info_dict)
+        return 0
+
+    print(user_info_dict['id'], invite_friend_id)
+    conn, cur = connect_db()
+
+    if get_user_info_by_id(invite_friend_id) is False:
+        close_connect_to_db(conn, cur)
+        bot.send_message(message.chat.id, 'Пользователь с данным ID не найден')
+        create_profile_menu(message, user_info_dict)
+        return 0
+
+    friend_status = check_friend(my_id, invite_friend_id)
+    my_status = check_friend(invite_friend_id, my_id)
+
+    my_friend_status = return_friend_status(my_id, invite_friend_id, "friend")
+    friend_friend_status = return_friend_status(invite_friend_id, my_id, "friend")
+    print(my_friend_status, friend_friend_status)
+    if my_friend_status == friend_friend_status == True:
+        bot.send_message(message.chat.id, 'Данный пользователь уже есть у вас в друзьях')
+        create_profile_menu(message, user_info_dict)
+        return 0
+    if friend_status is True:
+        cur.execute(
+            'update friend_list set friend_status = "%s" where user_id = %d and friend_id = %d' % (
+                'invite', invite_friend_id, my_id)
+        )
+    else:
+        cur.execute(
+            "INSERT INTO friend_list (user_id, friend_id, friend_status) VALUES ('%d', '%d', '%s')" % (
+                invite_friend_id, my_id, 'invite')
+        )
+    if my_status is True:
+        cur.execute(
+            'update friend_list set friend_status = "%s" where user_id = %d and friend_id = %d' % (
+                'wait_invite', my_id, invite_friend_id)
+        )
+    else:
+        cur.execute(
+            "INSERT INTO friend_list (user_id, friend_id, friend_status) VALUES ('%d', '%d', '%s')" % (
+                my_id, invite_friend_id, 'wait_invite')
+        )
+
+    conn.commit()
+
+    close_connect_to_db(conn, cur)
+
+    bot.send_message(message.chat.id, 'Заявка в друзья отправлена')
+    create_profile_menu(message, user_info_dict)
+
+
 def on_click_profile_menu(message, user_info_dict):
     if message.text == 'Назад в меню':
         create_main_menu(message, user_info_dict)
@@ -326,14 +453,14 @@ def on_click_profile_menu(message, user_info_dict):
         bot.register_next_step_handler(message, on_click_profile_menu, user_info_dict)
     if message.text == 'Заявки в друзья':
         get_friend_invite(message, user_info_dict)
-        # pass
+        # create_profile_menu(message, user_info_dict)
     if message.text == 'Добавить в друзья':
         bot.send_message(message.chat.id, 'Попросите вашего друга сообщить ID\nВведите ID друга:')
-        # bot.register_next_step_handler(message, add_to_friend)
+        bot.register_next_step_handler(message, send_friend_invitation, user_info_dict)
     if message.text == 'Удалить из друзей':
         bot.send_message(message.chat.id, 'Выберите друга, которого хотите удалить')
-        # get_friend_list(message)
-        bot.register_next_step_handler(message, on_click_profile_menu)
+        get_friend_list(message, user_info_dict)
+        bot.register_next_step_handler(message, on_click_profile_menu, user_info_dict)
 
 
 def get_friend_list(message, user_info_dict):
@@ -356,7 +483,7 @@ def get_friend_list(message, user_info_dict):
         print(friend[2], friend[3])
         friend_list_txt += f'ID: {friend[2]} Имя: {friend[3]}\n'
         markup.add(types.InlineKeyboardButton(f'ID: {friend[2]} | Имя: {friend[3]}\n',
-                                              callback_data=f'delete_menu{friend[2]}'))
+                                              callback_data=f'{user_tg_id}delete_friend_menu{friend[2]}'))
         print(f'delete_menu{friend[2]}')
 
     if friend_list_txt == '':
@@ -369,24 +496,112 @@ def get_friend_list(message, user_info_dict):
     close_connect_to_db(conn, cur)
 
 
+def create_event_from_data(event_info, user_info_dict):
+    event_info_list = []
+    creator_id = user_info_dict['id']
+    for info in event_info.values():
+        event_info_list.append(info)
+    event_info_list.append(creator_id)
+    print(tuple(event_info_list))
+
+    conn = sqlite3.connect(DBNAME)
+    cur = conn.cursor()
+
+    cur.execute(
+        "INSERT INTO event_list (name, time_and_date, place, info, creator_id, event_status) VALUES ('%s', '%s', '%s', '%s', '%d', 'active')" % tuple(
+            event_info_list)
+    )
+
+    conn.commit()
+
+    cur.close()
+    conn.close()
+
+
+def get_event_info_from_user(message, event_info, user_info_dict):
+    event_dop_info = message.text
+    if event_dop_info == 'Отмена':
+        create_main_menu(message, user_info_dict)
+        return 0
+    event_info['info'] = event_dop_info
+    print(event_info)
+    create_event_from_data(event_info, user_info_dict)
+    bot.send_message(message.chat.id,
+                     f'Мероприятие:\n{event_info["event_name"]}\nуспешно создано!\nВы можете найти его в списке ваших мероприятий')
+    create_main_menu(message, user_info_dict)
+
+
+def get_event_place_from_user(message, event_info, user_info_dict):
+    event_place = message.text
+    if event_place == 'Отмена':
+        create_main_menu(message, user_info_dict)
+        return 0
+    event_info['place'] = event_place
+    print(event_info)
+
+    bot.send_message(message.chat.id, 'Введите дополнительную информацию о мероприятии:')
+    bot.register_next_step_handler(message, get_event_info_from_user, event_info=event_info,
+                                   user_info_dict=user_info_dict)
+
+
+def get_event_time_and_date_from_user(message, event_info, user_info_dict):
+    event_date_and_time = message.text
+    if event_date_and_time == 'Отмена':
+        create_main_menu(message, user_info_dict)
+        return 0
+    event_info['time_and_date'] = event_date_and_time
+    print(event_info)
+    bot.send_message(message.chat.id, 'Введите место проведения мероприятия:')
+    bot.register_next_step_handler(message, get_event_place_from_user, event_info=event_info,
+                                   user_info_dict=user_info_dict)
+
+
+def get_event_name_from_user(message, user_info_dict):
+    event_name = message.text
+    if event_name == 'Отмена':
+        create_main_menu(message, user_info_dict)
+        return 0
+    # creator_id = get_id_from_database(message)
+    event_info = {
+        'event_name': event_name
+        # ,'creator_id': creator_id
+    }
+    print(event_info)
+
+    bot.send_message(message.chat.id, 'Введите дату и время мероприятия в любом удобном для вас формате:')
+    bot.register_next_step_handler(message, get_event_time_and_date_from_user, event_info=event_info,
+                                   user_info_dict=user_info_dict)
+
+
+def create_event(message, user_info_dict):
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
+    markup.row("Отмена")
+    bot.send_message(message.chat.id, 'Создаём мероприятие', reply_markup=REMOVE_BUTTON_SETTING)
+    bot.send_message(message.chat.id, 'Введите название мероприятия:', reply_markup=markup)
+
+    bot.register_next_step_handler(message, get_event_name_from_user, user_info_dict=user_info_dict)
+
+
 def on_click_main_menu(message, user_info_dict):
     if message.text == 'Профиль':
+        # print(get_user_info_by_id(30))
         get_profile(message)
-        get_user_info_by_tg_id(message.from_user.id)
+        # get_user_info_by_tg_id(message.from_user.id)
         create_profile_menu(message, user_info_dict)
         # pass
-    elif message.text == 'Заявки в друзья':
+    elif message.text == 'Приглашения':
         # get_friend_invite(message)
         pass
     elif message.text == 'Создать мероприятие':
-        pass
-        # create_event(message)
+        # pass
+        create_event(message, user_info_dict)
+        # create_main_menu(message, user_info_dict)
     elif message.text == 'Мои мероприятия':
         pass
         # create_event_type_menu(message)
     else:
         bot.reply_to(message, f'Неизвестная команда: {message.text}')
-        create_main_menu(message)
+        create_main_menu(message, user_info_dict)
 
 
 # Кнопка при старт в самом боте
