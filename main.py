@@ -47,7 +47,7 @@ def create_table():
     conn.commit()
 
     cur.execute(
-        'CREATE TABLE IF NOT EXISTS friend_response_to_event (id INTEGER PRIMARY KEY AUTOINCREMENT, event_id int, user_id int, is_creator bool, response_status varchar(20), info_from_user varchar(255))'
+        'CREATE TABLE IF NOT EXISTS friend_response_to_event (id INTEGER PRIMARY KEY AUTOINCREMENT, event_id int, user_id int, is_creator bool, response_status varchar(20), info_from_user varchar(255), who_invited int)'
     )
     conn.commit()
 
@@ -323,7 +323,7 @@ def callback_message(callback):
             user_info_dict = get_user_info_by_id(int(user_id))
             friend_info_dict = get_user_info_by_id(int(friend_id))
             if invite_status is False:
-                invite_friend_to_event(event_id, friend_id)
+                invite_friend_to_event(event_id, friend_id, user_info_dict)
 
                 markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
                 btn1 = types.KeyboardButton('Да')
@@ -444,13 +444,14 @@ def check_invite_friend_to_event(event_id_for_invite, number_friend_to_invite):
         return False
 
 
-def invite_friend_to_event(event_id_for_invite, user_id_for_invite):
+def invite_friend_to_event(event_id_for_invite, user_id_for_invite, user_info_dict):
     conn, cur = connect_db()
 
-    friend_from_info = (int(event_id_for_invite), int(user_id_for_invite), False, 'wait status', '')
+    friend_from_info = (
+        int(event_id_for_invite), int(user_id_for_invite), False, 'wait status', '', int(user_info_dict['id']))
 
     cur.execute(
-        "INSERT INTO friend_response_to_event (event_id, user_id, is_creator, response_status, info_from_user) VALUES ('%d', '%d', '%r', '%s', '%s')" % tuple(
+        "INSERT INTO friend_response_to_event (event_id, user_id, is_creator, response_status, info_from_user, who_invited) VALUES ('%d', '%d', '%r', '%s', '%s', '%d')" % tuple(
             friend_from_info)
     )
 
@@ -461,10 +462,10 @@ def invite_friend_to_event(event_id_for_invite, user_id_for_invite):
 def add_me_to_event(event_id_for_invite, user_id_for_invite):
     conn, cur = connect_db()
 
-    friend_from_info = (int(event_id_for_invite), int(user_id_for_invite), True, 'Да', '')
+    friend_from_info = (int(event_id_for_invite), int(user_id_for_invite), True, 'Да', '', int(user_id_for_invite))
 
     cur.execute(
-        "INSERT INTO friend_response_to_event (event_id, user_id, is_creator, response_status, info_from_user) VALUES ('%d', '%d', '%r', '%s', '%s')" % tuple(
+        "INSERT INTO friend_response_to_event (event_id, user_id, is_creator, response_status, info_from_user, who_invited) VALUES ('%d', '%d', '%r', '%s', '%s', '%d')" % tuple(
             friend_from_info)
     )
 
@@ -1046,7 +1047,7 @@ def get_event_list_participating_me(message, user_info_dict, top_limit=5, start_
     print(len(event_list))
     for event in event_list:
         markup.add(
-            types.InlineKeyboardButton(f'- {event[7]} | ID: {event[1]}',
+            types.InlineKeyboardButton(f'- {event[8]} | ID: {event[1]}',
                                        callback_data=f'{user_id}participating_event_menu{event[0]}participating_event_menu{event[1]}'))
 
     if len(full_event_list) > 5:
@@ -1087,9 +1088,47 @@ def on_click_events_type(message, user_info_dict):
         create_main_menu(message, user_info_dict)
 
 
-def get_invites_list_to_event(message, user_info_dict):
-    print()
-    stop_here
+def get_invites_list_to_event(message, user_info_dict, top_limit=5, start_limit=0):
+    conn, cur = connect_db()
+
+    cur.execute(
+        '''
+            select * from friend_response_to_event frte
+            left join event_list el on frte.event_id = el.id 
+            left join users u on u.id = frte.user_id 
+            where 
+            user_id = %d 
+            and response_status = 'wait status'
+            order by el.name 
+            limit %d offset %d
+        '''
+
+        % (int(user_info_dict['id']), top_limit, start_limit)
+    )
+
+    all_invites = cur.fetchall()
+
+    close_connect_to_db(conn, cur)
+
+    markup = types.InlineKeyboardMarkup()
+
+    friend_list_txt = ''
+
+    for invite in all_invites:
+        print(invite[2], invite[3])
+        friend_list_txt += f'ID: {invite[2]} Имя: {invite[8]}\n'
+        markup.add(types.InlineKeyboardButton(f'- {invite[8]} | ID: {invite[1]}\n',
+                                              callback_data=f'{user_info_dict["id"]}invites_menu{invite[1]}invites_menu{invite[6]}'))
+        # print(f'invites_menu{invite[2]}')
+
+    markup.add(types.InlineKeyboardButton('Отмена', callback_data=f'{user_info_dict["id"]}creator_event_menu_cancel'))
+
+    if friend_list_txt == '':
+        friend_list_txt = 'Приглашений не найдено(\n'
+        bot.send_message(message.chat.id, friend_list_txt)
+
+    else:
+        bot.send_message(message.chat.id, 'Ваc пригласили на:', reply_markup=markup)
 
 
 def on_click_main_menu(message, user_info_dict):
