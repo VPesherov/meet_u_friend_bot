@@ -224,7 +224,7 @@ def get_friend_invite(message, user_info_dict):
     user_tg_id = int(user_info_dict['tg_id'])
 
     cur.execute(
-        'select distinct TBL2.name, user_id, friend_id, TBL1.name, friend_status from friend_list as TBL left join users as TBL1 on TBL.friend_id = TBL1.id left join users as TBL2 on TBL2.id = TBL.user_id where TBL2.tg_id = %d and friend_status = "invite"' % (
+        'select distinct TBL2.name, user_id, friend_id, TBL1.name, friend_status from friend_list as TBL left join users as TBL1 on TBL.friend_id = TBL1.id left join users as TBL2 on TBL2.id = TBL.user_id where TBL2.tg_id = %d and friend_status = "invite" order by TBL1.name' % (
             user_tg_id)
     )
 
@@ -237,7 +237,7 @@ def get_friend_invite(message, user_info_dict):
     for friend in friend_list:
         friend_list_txt += f'ID: {friend[2]} Имя: {friend[3]}\n'
         markup.add(
-            types.InlineKeyboardButton(f'ID: {friend[2]} | Имя: {friend[3]}\n',
+            types.InlineKeyboardButton(f'- {friend[3]} | ID: {friend[2]}\n',
                                        callback_data=f'{user_tg_id}add_new_friend_menu{friend[2]}'))
 
     if friend_list_txt == '':
@@ -375,6 +375,45 @@ def callback_message(callback):
         user_info_dict = get_user_info_by_id(int(user_id))
         print(start_limit, top_limit)
         get_event_list_create_by_me_by(callback.message, user_info_dict, top_limit, start_limit)
+    if 'next_page_participating_event' in callback.data:
+        bot.delete_message(callback.message.chat.id, callback.message.message_id)
+
+        user_id, start_limit, top_limit = str(callback.data).replace('next_page_participating_event',
+                                                                     '|').strip().split('|')
+        print(callback.data)
+        start_limit = int(start_limit) + 5
+        top_limit = int(top_limit)
+        user_info_dict = get_user_info_by_id(int(user_id))
+        print(start_limit, top_limit)
+        get_event_list_create_by_me_by(callback.message, user_info_dict, top_limit, start_limit)
+    if 'prev_page_participating_event' in callback.data:
+        bot.delete_message(callback.message.chat.id, callback.message.message_id)
+
+        user_id, start_limit, top_limit = str(callback.data).replace('prev_page_participating_event',
+                                                                     '|').strip().split('|')
+        print(callback.data)
+        start_limit = int(start_limit) - 5
+        top_limit = int(top_limit)
+        user_info_dict = get_user_info_by_id(int(user_id))
+        print(start_limit, top_limit)
+        get_event_list_create_by_me_by(callback.message, user_info_dict, top_limit, start_limit)
+    if 'participating_event_menu' in callback.data:
+        user_id, record_id, event_id = str(callback.data).replace('participating_event_menu', '|').strip().split('|')
+
+        if callback.data == user_id + 'participating_event_menu' + record_id + 'participating_event_menu' + event_id:
+            bot.delete_message(callback.message.chat.id, callback.message.message_id)
+            user_info_dict = get_user_info_by_id(int(user_id))
+            create_actions_for_participating_event_menu(callback.message, event_id, user_info_dict)
+            bot.register_next_step_handler(callback.message, on_click_participating_event_menu_confirmation,
+                                           event_id=event_id, user_info_dict=user_info_dict)
+
+
+def on_click_participating_event_menu_confirmation(message, event_id, user_info_dict):
+    if message.text == 'Главное меню':
+        create_main_menu(message, user_info_dict)
+    if message.text == 'Список всех мероприятий':
+        bot.send_message(message.chat.id, 'Загрузка мероприятий...', reply_markup=REMOVE_BUTTON_SETTING)
+        get_event_list_participating_me(message, user_info_dict, 5, 0)
 
 
 def on_click_menu_invite_again(message, event_id_for_invite, user_info_dict):
@@ -483,6 +522,26 @@ def create_actions_for_event_menu(message, event_id, user_info_dict):
     bot.send_message(message.chat.id, event_info_txt, reply_markup=markup)
 
 
+def create_actions_for_participating_event_menu(message, event_id, user_info_dict):
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
+    btn1 = types.KeyboardButton('Подробнее о мероприятии')
+    # btn2 = types.KeyboardButton('Удалить мероприятие')
+    btn5 = types.KeyboardButton('Главное меню')
+    # btn4 = types.KeyboardButton('Изменить мероприятие')
+    btn3 = types.KeyboardButton('Список всех мероприятий')
+    markup.row(btn1)
+    # markup.row(btn4, btn2)
+    # markup.row(btn2)
+    markup.row(btn3)
+    markup.row(btn5)
+    print(event_id)
+    event_id = int(event_id)
+    event_info_dict = get_info_about_event_by_id(event_id)
+    event_info_txt = f'ID события: {event_info_dict["id"]}\n\nНазвание мероприятия:\n{event_info_dict["name"]}\n\nВремя и дата мероприятия:\n{event_info_dict["time_and_date"]}\n\nДополнительная информафия:\n{event_info_dict["info"]}'
+
+    bot.send_message(message.chat.id, event_info_txt, reply_markup=markup)
+
+
 def delete_my_event(event_id):
     conn, cur = connect_db()
 
@@ -500,7 +559,7 @@ def choice_friend_for_event(message, event_id, user_info_dict):
     user_tg_id = user_info_dict['tg_id']
 
     cur.execute(
-        'select distinct TBL2.name, user_id, friend_id, TBL1.name, friend_status from friend_list as TBL left join users as TBL1 on TBL.friend_id = TBL1.id left join users as TBL2 on TBL2.id = TBL.user_id where TBL2.tg_id = %d and friend_status = "friend"' % (
+        'select distinct TBL2.name, user_id, friend_id, TBL1.name, friend_status from friend_list as TBL left join users as TBL1 on TBL.friend_id = TBL1.id left join users as TBL2 on TBL2.id = TBL.user_id where TBL2.tg_id = %d and friend_status = "friend" order by TBL1.name' % (
             user_tg_id)
     )
 
@@ -514,7 +573,7 @@ def choice_friend_for_event(message, event_id, user_info_dict):
         # print(friend[2], friend[3])
         friend_list_txt += f'ID: {friend[2]} Имя: {friend[3]}\n'
         markup.add(
-            types.InlineKeyboardButton(f'ID: {friend[2]} | Имя: {friend[3]}\n',
+            types.InlineKeyboardButton(f'- {friend[3]} | ID: {friend[2]}\n',
                                        callback_data=f'{user_info_dict["id"]}invite_friend_to_event{event_id}invite_friend_to_event{friend[2]}'))
     markup.add(
         types.InlineKeyboardButton(f'Отмена',
@@ -734,7 +793,7 @@ def get_friend_list(message, user_info_dict):
     user_tg_id = int(user_info_dict['tg_id'])
 
     cur.execute(
-        'select distinct TBL2.name, user_id, friend_id, TBL1.name, friend_status from friend_list as TBL left join users as TBL1 on TBL.friend_id = TBL1.id left join users as TBL2 on TBL2.id = TBL.user_id where TBL2.tg_id = %d and friend_status = "friend"' % (
+        'select distinct TBL2.name, user_id, friend_id, TBL1.name, friend_status from friend_list as TBL left join users as TBL1 on TBL.friend_id = TBL1.id left join users as TBL2 on TBL2.id = TBL.user_id where TBL2.tg_id = %d and friend_status = "friend" order by TBL1.name' % (
             user_tg_id)
     )
 
@@ -747,7 +806,7 @@ def get_friend_list(message, user_info_dict):
     for friend in friend_list:
         print(friend[2], friend[3])
         friend_list_txt += f'ID: {friend[2]} Имя: {friend[3]}\n'
-        markup.add(types.InlineKeyboardButton(f'ID: {friend[2]} | Имя: {friend[3]}\n',
+        markup.add(types.InlineKeyboardButton(f'- {friend[3]} | ID: {friend[2]}\n',
                                               callback_data=f'{user_tg_id}delete_friend_menu{friend[2]}'))
         print(f'delete_menu{friend[2]}')
 
@@ -925,7 +984,7 @@ def get_event_list_create_by_me_by(message, user_info_dict, top_limit=5, start_l
     print(len(event_list))
     for event in event_list:
         markup.add(
-            types.InlineKeyboardButton(f'ID: {event[0]} | Имя: {event[1]}',
+            types.InlineKeyboardButton(f'- {event[1]} | ID: {event[0]}',
                                        callback_data=f'{user_id}creator_event_menu{event[0]}'))
     if len(full_event_list) > 5:
         if start_limit == 0:
@@ -987,8 +1046,8 @@ def get_event_list_participating_me(message, user_info_dict, top_limit=5, start_
     print(len(event_list))
     for event in event_list:
         markup.add(
-            types.InlineKeyboardButton(f'ID: {event[1]} | Имя: {event[7]}',
-                                       callback_data=f'{user_id}participating_event_menu{event[0]}'))
+            types.InlineKeyboardButton(f'- {event[7]} | ID: {event[1]}',
+                                       callback_data=f'{user_id}participating_event_menu{event[0]}participating_event_menu{event[1]}'))
 
     if len(full_event_list) > 5:
         if start_limit == 0:
@@ -1028,6 +1087,11 @@ def on_click_events_type(message, user_info_dict):
         create_main_menu(message, user_info_dict)
 
 
+def get_invites_list_to_event(message, user_info_dict):
+    print()
+    stop_here
+
+
 def on_click_main_menu(message, user_info_dict):
     if message.text == 'Профиль':
         # print(get_user_info_by_id(30))
@@ -1036,8 +1100,7 @@ def on_click_main_menu(message, user_info_dict):
         create_profile_menu(message, user_info_dict)
         # pass
     elif message.text == 'Приглашения':
-        # get_friend_invite(message)
-        pass
+        get_invites_list_to_event(message, user_info_dict)
     elif message.text == 'Создать мероприятие':
         # pass
         create_event(message, user_info_dict)
