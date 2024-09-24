@@ -14,6 +14,8 @@ DBNAME = os.getenv('DBNAME')
 
 REMOVE_BUTTON_SETTING = telebot.types.ReplyKeyboardRemove()
 
+WAIT_RESPONSE_STATUS = 'Приглашение отправлено'
+
 
 def connect_db():
     conn = sqlite3.connect(DBNAME)
@@ -398,22 +400,181 @@ def callback_message(callback):
         print(start_limit, top_limit)
         get_event_list_create_by_me_by(callback.message, user_info_dict, top_limit, start_limit)
     if 'participating_event_menu' in callback.data:
-        user_id, record_id, event_id = str(callback.data).replace('participating_event_menu', '|').strip().split('|')
+        user_id, record_id, event_id, who_invited_id = str(callback.data).replace('participating_event_menu', '|').strip().replace('p', '|').split('|')
 
-        if callback.data == user_id + 'participating_event_menu' + record_id + 'participating_event_menu' + event_id:
+        if callback.data == user_id + 'participating_event_menu' + record_id + 'participating_event_menu' + event_id + 'p' + who_invited_id:
             bot.delete_message(callback.message.chat.id, callback.message.message_id)
             user_info_dict = get_user_info_by_id(int(user_id))
             create_actions_for_participating_event_menu(callback.message, event_id, user_info_dict)
             bot.register_next_step_handler(callback.message, on_click_participating_event_menu_confirmation,
-                                           event_id=event_id, user_info_dict=user_info_dict)
+                                           event_id=event_id, user_info_dict=user_info_dict, who_invited_id=who_invited_id)
+    if 'invites_menu' in callback.data:
+        user_id, event_id, who_invited, record_id = str(callback.data).replace('invites_menu', '|').strip().split('|')
+        print(user_id, event_id, who_invited, record_id)
+        if callback.data == user_id + 'invites_menu' + event_id + 'invites_menu' + who_invited + 'invites_menu' + record_id:
+            bot.delete_message(callback.message.chat.id, callback.message.message_id)
+            user_info_dict = get_user_info_by_id(int(user_id))
+            event_info_dict = get_info_about_event_by_id(int(event_id))
+            who_invited_info = get_user_info_by_id(int(who_invited))
+            buttons = create_actions_for_invite_menu(callback.message, event_info_dict, who_invited_info)
+
+            event_info_txt = f'ID события: {event_info_dict["id"]}\n\nВас пригласил:\n{who_invited_info["name"]}\n\nНазвание мероприятия:\n{event_info_dict["name"]}\n\nВремя и дата мероприятия:\n{event_info_dict["time_and_date"]}\n\nДополнительная информафия:\n{event_info_dict["info"]}\n\n'
+
+            bot.send_message(callback.message.chat.id, event_info_txt, reply_markup=buttons)
+
+            bot.register_next_step_handler(callback.message, on_click_invite_to_event_menu,
+                                           event_info_dict=event_info_dict, user_info_dict=user_info_dict,
+                                           record_id=int(record_id),
+                                           who_invited_info=who_invited_info)
 
 
-def on_click_participating_event_menu_confirmation(message, event_id, user_info_dict):
+def set_status_for_invite(record_id, status, info_from_user=''):
+    conn, cur = connect_db()
+
+    cur.execute(
+        'update friend_response_to_event set response_status = "%s", info_from_user="%s" where id = %d' % (
+            status, info_from_user, record_id)
+    )
+
+    conn.commit()
+
+    close_connect_to_db(conn, cur)
+
+
+def get_full_info_about_event(message, user_info_dict, event_info_dict, who_invited_info):
+    # event_info_dict = get_info_about_event_by_id(int(event_id))
+
+    creator_info = get_user_info_by_id(int(event_info_dict["creator_id"]))
+
+    full_text_about_event = f'Создатель мероприятия:\n{creator_info["name"]}\n\nНазвание мероприятия:\n{event_info_dict["name"]}\n\nВремя и дата мероприятия:\n{event_info_dict["time_and_date"]}\n\nМесто проведения мероприятия:\n{event_info_dict["place"]}\n\nМероприятие было создано:\n{event_info_dict["created_at"]}\n\nВас пригласил:\n{who_invited_info["name"]}'
+
+    bot.send_message(message.chat.id, full_text_about_event)
+
+
+def get_more_info_from_user_menu():
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
+    btn1 = types.KeyboardButton('Отмена')
+    markup.row(btn1)
+
+    return markup
+
+
+def on_click_get_more_info_from_user_menu(message, event_info_dict, user_info_dict, record_id, who_invited_info,
+                                          status):
+    if message.text == 'Отмена':
+        create_main_menu(message, user_info_dict)
+    else:
+        set_status_for_invite(record_id, status=status, info_from_user=message.text)
+        create_main_menu(message, user_info_dict)
+
+
+def get_more_info_from_user(message, event_info_dict, user_info_dict, record_id, who_invited_info, status):
+    buttons = get_more_info_from_user_menu()
+    bot.send_message(message.chat.id,
+                     'Спасибо! Ваш ответ записан!\nЕсли хотите дать дополнительные пояснения может написать их ниже или нажать отмена',
+                     reply_markup=buttons)
+    bot.register_next_step_handler(message, on_click_get_more_info_from_user_menu,
+                                   event_info_dict=event_info_dict, user_info_dict=user_info_dict,
+                                   record_id=int(record_id),
+                                   who_invited_info=who_invited_info, status=status)
+
+
+def on_click_invite_to_event_menu(message, event_info_dict, user_info_dict, record_id, who_invited_info):
+    if message.text == 'Принять':
+        status = 'Иду'
+        set_status_for_invite(record_id, status=status)
+        get_more_info_from_user(message, event_info_dict, user_info_dict, record_id, who_invited_info, status)
+        # create_main_menu(message, user_info_dict)
+    if message.text == 'Отклонить':
+        status = 'Не иду'
+        set_status_for_invite(record_id, status=status)
+        get_more_info_from_user(message, event_info_dict, user_info_dict, record_id, who_invited_info, status)
+        # create_main_menu(message, user_info_dict)
+    if message.text == 'Подробнее о мероприятии':
+        bot.delete_message(message.chat.id, message.message_id - 1)
+        buttons = create_actions_for_invite_menu(message, event_info_dict, who_invited_info)
+        bot.send_message(message.chat.id, 'Загрузка мероприятия...', reply_markup=buttons)
+        get_full_info_about_event(message, user_info_dict, event_info_dict, who_invited_info)
+        get_user_status_for_event(message, event_info_dict["id"])
+        bot.register_next_step_handler(message, on_click_invite_to_event_menu,
+                                       event_info_dict=event_info_dict, user_info_dict=user_info_dict,
+                                       record_id=int(record_id),
+                                       who_invited_info=who_invited_info)
+    if message.text == 'Отмена':
+        create_main_menu(message, user_info_dict)
+
+
+def get_user_status_for_event(message, event_id):
+    conn, cur = connect_db()
+
+    cur.execute(
+        '''
+        select name, response_status, is_creator,
+            case when is_creator = 'True'
+            then 
+                ' - создатель мероприятия'
+            else
+                info_from_user  
+            end as info_from_user 
+        from friend_response_to_event frte 
+        left join users u on u.id = frte.user_id 
+        where event_id = %d
+        ''' % (int(event_id))
+    )
+
+    users_status = cur.fetchall()
+
+    close_connect_to_db(conn, cur)
+
+    user_status_txt = ''
+
+    for user in users_status:
+        # print(friend[2], friend[3])
+        user_status_txt += f'{user[0]}: {user[1]} / {user[3]}\n'
+
+    print(user_status_txt)
+    if user_status_txt == '':
+        user_status_txt = 'Список друзей пуст(\nДрузья могут отсылать вам заявки по ID'
+        # bot.send_message(message.chat.id, friend_list_txt)
+    else:
+        bot.send_message(message.chat.id, 'Список людей приглашённых на мероприятие:\n\n' + user_status_txt)
+
+
+def create_actions_for_invite_menu(message, event_info_dict, who_invited_info):
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
+    btn1 = types.KeyboardButton('Принять')
+    btn2 = types.KeyboardButton('Отклонить')
+    btn3 = types.KeyboardButton('Подробнее о мероприятии')
+    btn4 = types.KeyboardButton('Отмена')
+    markup.row(btn1)
+    markup.row(btn2)
+    markup.row(btn3)
+    markup.row(btn4)
+
+    return markup
+
+    # bot.delete_message(message.chat.id, message.message_id - 1)
+    # event_info_txt = f'ID события: {event_info_dict["id"]}\n\nВас пригласил:\n{who_invited_info["name"]}\n\nНазвание мероприятия:\n{event_info_dict["name"]}\n\nВремя и дата мероприятия:\n{event_info_dict["time_and_date"]}\n\nДополнительная информафия:\n{event_info_dict["info"]}'
+    #
+    # bot.send_message(message.chat.id, event_info_txt, reply_markup=markup)
+
+
+def on_click_participating_event_menu_confirmation(message, event_id, user_info_dict, who_invited_id):
     if message.text == 'Главное меню':
         create_main_menu(message, user_info_dict)
     if message.text == 'Список всех мероприятий':
         bot.send_message(message.chat.id, 'Загрузка мероприятий...', reply_markup=REMOVE_BUTTON_SETTING)
         get_event_list_participating_me(message, user_info_dict, 5, 0)
+    if message.text == 'Подробнее о мероприятии':
+
+        event_info_dict = get_info_about_event_by_id(event_id)
+        who_invited_info = get_user_info_by_id(int(who_invited_id))
+
+        bot.delete_message(message.chat.id, message.message_id - 1)
+        # buttons = create_actions_for_invite_menu(message, event_info_dict, who_invited_info)
+        bot.send_message(message.chat.id, 'Загрузка мероприятия...')
+        get_full_info_about_event(message, user_info_dict, event_info_dict, who_invited_info)
+        get_user_status_for_event(message, event_info_dict["id"])
 
 
 def on_click_menu_invite_again(message, event_id_for_invite, user_info_dict):
@@ -448,7 +609,7 @@ def invite_friend_to_event(event_id_for_invite, user_id_for_invite, user_info_di
     conn, cur = connect_db()
 
     friend_from_info = (
-        int(event_id_for_invite), int(user_id_for_invite), False, 'wait status', '', int(user_info_dict['id']))
+        int(event_id_for_invite), int(user_id_for_invite), False, WAIT_RESPONSE_STATUS, '', int(user_info_dict['id']))
 
     cur.execute(
         "INSERT INTO friend_response_to_event (event_id, user_id, is_creator, response_status, info_from_user, who_invited) VALUES ('%d', '%d', '%r', '%s', '%s', '%d')" % tuple(
@@ -462,7 +623,7 @@ def invite_friend_to_event(event_id_for_invite, user_id_for_invite, user_info_di
 def add_me_to_event(event_id_for_invite, user_id_for_invite):
     conn, cur = connect_db()
 
-    friend_from_info = (int(event_id_for_invite), int(user_id_for_invite), True, 'Да', '', int(user_id_for_invite))
+    friend_from_info = (int(event_id_for_invite), int(user_id_for_invite), True, 'Иду', '', int(user_id_for_invite))
 
     cur.execute(
         "INSERT INTO friend_response_to_event (event_id, user_id, is_creator, response_status, info_from_user, who_invited) VALUES ('%d', '%d', '%r', '%s', '%s', '%d')" % tuple(
@@ -538,7 +699,7 @@ def create_actions_for_participating_event_menu(message, event_id, user_info_dic
     print(event_id)
     event_id = int(event_id)
     event_info_dict = get_info_about_event_by_id(event_id)
-    event_info_txt = f'ID события: {event_info_dict["id"]}\n\nНазвание мероприятия:\n{event_info_dict["name"]}\n\nВремя и дата мероприятия:\n{event_info_dict["time_and_date"]}\n\nДополнительная информафия:\n{event_info_dict["info"]}'
+    event_info_txt = f'ID события: {event_info_dict["id"]}\n\nНазвание мероприятия:\n{event_info_dict["name"]}\n\nВремя и дата мероприятия:\n{event_info_dict["time_and_date"]}\n\nДополнительная информафия:\n{event_info_dict["info"]}Ваш ответ: - добавить'
 
     bot.send_message(message.chat.id, event_info_txt, reply_markup=markup)
 
@@ -1021,7 +1182,7 @@ def get_event_list_participating_me(message, user_info_dict, top_limit=5, start_
         '''
         select * from friend_response_to_event frte
         left join event_list el on el.id = frte.event_id
-        where user_id = %d and response_status = "Да"
+        where user_id = %d and response_status = "Иду"
         order by name 
         limit %d offset %d
         '''
@@ -1048,7 +1209,7 @@ def get_event_list_participating_me(message, user_info_dict, top_limit=5, start_
     for event in event_list:
         markup.add(
             types.InlineKeyboardButton(f'- {event[8]} | ID: {event[1]}',
-                                       callback_data=f'{user_id}participating_event_menu{event[0]}participating_event_menu{event[1]}'))
+                                       callback_data=f'{user_id}participating_event_menu{event[0]}participating_event_menu{event[1]}p{event[6]}'))
 
     if len(full_event_list) > 5:
         if start_limit == 0:
@@ -1098,12 +1259,12 @@ def get_invites_list_to_event(message, user_info_dict, top_limit=5, start_limit=
             left join users u on u.id = frte.user_id 
             where 
             user_id = %d 
-            and response_status = 'wait status'
+            and response_status = '%s'
             order by el.name 
             limit %d offset %d
         '''
 
-        % (int(user_info_dict['id']), top_limit, start_limit)
+        % (int(user_info_dict['id']), WAIT_RESPONSE_STATUS, top_limit, start_limit)
     )
 
     all_invites = cur.fetchall()
@@ -1118,7 +1279,7 @@ def get_invites_list_to_event(message, user_info_dict, top_limit=5, start_limit=
         print(invite[2], invite[3])
         friend_list_txt += f'ID: {invite[2]} Имя: {invite[8]}\n'
         markup.add(types.InlineKeyboardButton(f'- {invite[8]} | ID: {invite[1]}\n',
-                                              callback_data=f'{user_info_dict["id"]}invites_menu{invite[1]}invites_menu{invite[6]}'))
+                                              callback_data=f'{user_info_dict["id"]}invites_menu{invite[1]}invites_menu{invite[6]}invites_menu{invite[0]}'))
         # print(f'invites_menu{invite[2]}')
 
     markup.add(types.InlineKeyboardButton('Отмена', callback_data=f'{user_info_dict["id"]}creator_event_menu_cancel'))
@@ -1126,7 +1287,7 @@ def get_invites_list_to_event(message, user_info_dict, top_limit=5, start_limit=
     if friend_list_txt == '':
         friend_list_txt = 'Приглашений не найдено(\n'
         bot.send_message(message.chat.id, friend_list_txt)
-
+        create_main_menu(message, user_info_dict)
     else:
         bot.send_message(message.chat.id, 'Ваc пригласили на:', reply_markup=markup)
 
@@ -1139,6 +1300,7 @@ def on_click_main_menu(message, user_info_dict):
         create_profile_menu(message, user_info_dict)
         # pass
     elif message.text == 'Приглашения':
+        bot.send_message(message.chat.id, 'Загрузка мероприятий...', reply_markup=REMOVE_BUTTON_SETTING)
         get_invites_list_to_event(message, user_info_dict)
     elif message.text == 'Создать мероприятие':
         # pass
